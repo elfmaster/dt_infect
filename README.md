@@ -4,10 +4,14 @@ Author: ElfMaster 2/15/19 - ryan@bitlackeys.org
 
 ELF Shared library injector using DT_NEEDED precedence infection. Acts as a permanent LD_PRELOAD
 
+NOTE: It does not work on PIE executables because it uses a reverse text padding infection to create room
+for .dynstr. This could be replaced with a text padding infection, or a PT_NOTE to PT_LOAD conversion
+infection in order to store the .dynstr; then it would be compatible with PIE executables.
+
 # Build
 git clone https://github.com/elfmaster/libelfmaster
 cd libelfmaster; make; sudo make install
-
+https://github.com/elfmaster/dt_infect/issues
 # Example
 
 -- Run test before it is infected
