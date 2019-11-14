@@ -3,6 +3,7 @@ all:
 	gcc -no-pie test.c -o test
 	gcc -c -fpic evil.c
 	gcc -c -fpic logger.c
+	gcc -no-pie shell.c -o shell
 	gcc -shared -o libevil.so evil.o -ldl
 	gcc -shared -o liblogger.so logger.o -ldl
 clean:
