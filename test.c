@@ -3,5 +3,11 @@
 
 int main(void)
 {
-	printf("Don't infect me please\n");
+	char buf[512];
+	for (;;) {
+		printf("Enter your name: ");
+		read(0, buf, 64);
+		printf("Your name is: %s\n", buf);
+	}
+	close(0);
 }
